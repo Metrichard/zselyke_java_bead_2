@@ -7,9 +7,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class Base {
+    private AtomicInteger numberOfMiners = new AtomicInteger(0);
+    private AtomicInteger numberOfLumberjacks = new AtomicInteger(0);
 
     private static final int STARTER_PEASANT_NUMBER = 5;
     private static final int PEASANT_NUMBER_GOAL = 10;
@@ -40,52 +43,31 @@ public class Base {
 
     public void startPreparation(){
         executorService.execute(() -> {
-            while(!hasEnoughBuilding(UnitType.FARM, 3) &&
-                    !hasEnoughBuilding(UnitType.LUMBERMILL, 1) &&
-                    !hasEnoughBuilding(UnitType.BLACKSMITH, 1)) {
-                if (!hasEnoughBuilding(UnitType.FARM, 3)) {
-                    Peasant peasant = getFreePeasant();
-                    if (peasant != null)
-                        if(!peasant.tryBuilding(UnitType.FARM))
-                            continue;
-                }
-                if (!hasEnoughBuilding(UnitType.LUMBERMILL, 1)) {
-                    Peasant peasant = getFreePeasant();
-                    if (peasant != null)
-                        if(!peasant.tryBuilding(UnitType.LUMBERMILL))
-                            continue;
-                }
-                if (!hasEnoughBuilding(UnitType.BLACKSMITH, 1)) {
-                    Peasant peasant = getFreePeasant();
-                    if (peasant != null)
-                        peasant.tryBuilding(UnitType.BLACKSMITH);
-                }
-            }
-            Thread.currentThread().interrupt();
-        });
-
-        executorService.execute(() -> {
-            int numberOfMiners = 0;
-            int numberOfLumberjacks = 0;
-            while(peasants.size() < PEASANT_NUMBER_GOAL) {
-                Peasant peasant = Peasant.createPeasant(this);
-                if(peasant != null) {
-                    if (numberOfLumberjacks < 1) {
-                        peasant.startCuttingWood();
-                        numberOfLumberjacks++;
-                    } else if (numberOfMiners < 2) {
-                        peasant.startMining();
-                        numberOfMiners++;
-                    }
-                    peasants.add(peasant);
-                }
-            }
-        });
-
-        while (!(peasants.size() == PEASANT_NUMBER_GOAL) && !hasEnoughBuilding(UnitType.FARM, 3) && !hasEnoughBuilding(UnitType.LUMBERMILL, 1) &&
-                !hasEnoughBuilding(UnitType.BLACKSMITH, 1)) {
             try {
-                TimeUnit.MILLISECONDS.sleep(500);
+                buildingThread();
+            } catch (InterruptedException e) {
+            }
+        });
+
+        executorService.execute(this::peasantThread);
+
+        boolean farms = hasEnoughBuilding(UnitType.FARM, 3);
+        boolean lumbers = hasEnoughBuilding(UnitType.LUMBERMILL, 1);
+        boolean smiths = hasEnoughBuilding(UnitType.BLACKSMITH, 1);
+        while(!farms && !lumbers && !smiths)
+        {
+            farms = hasEnoughBuilding(UnitType.FARM, 3);
+            lumbers = hasEnoughBuilding(UnitType.LUMBERMILL, 1);
+            smiths = hasEnoughBuilding(UnitType.BLACKSMITH, 1);
+            try {
+                TimeUnit.MILLISECONDS.sleep(200);
+            } catch (InterruptedException e) {
+            }
+        }
+
+        while (!(peasants.size() == PEASANT_NUMBER_GOAL) ) {
+            try {
+                TimeUnit.MILLISECONDS.sleep(200);
             } catch (InterruptedException e) {
             }
         }
@@ -93,14 +75,56 @@ public class Base {
         for(Peasant peasant : peasants) {
             peasant.stopHarvesting();
         }
+
         System.out.println(this.name + " finished creating a base");
         System.out.println(this.name + " peasants: " + this.peasants.size());
-        for(Building b : buildings){
+        for (int i = 0, buildingsSize = buildings.size(); i < buildingsSize; i++) {
+            Building b = buildings.get(i);
             System.out.println(this.name + " has a  " + b.getUnitType().toString());
         }
-
+        System.exit(0);
     }
 
+    private void peasantThread() {
+
+        while(peasants.size() < PEASANT_NUMBER_GOAL) {
+            if(resources.getCapacity() + UnitType.PEASANT.foodCost < resources.getCapacityLimit()) {
+                Peasant peasant = Peasant.createPeasant(this);
+                if (numberOfLumberjacks.get() < 1) {
+                    peasant.startCuttingWood();
+                    numberOfLumberjacks.addAndGet(1);
+                } else if (numberOfMiners.get() < 2) {
+                    peasant.startMining();
+                    numberOfMiners.addAndGet(1);
+                }
+                peasants.add(peasant);
+            }
+        }
+        System.out.println("\t\tPeasant thread done\n");
+    }
+
+    private void buildingThread() throws InterruptedException {
+        while(!Thread.interrupted()) {
+            if (!hasEnoughBuilding(UnitType.FARM, 3)) {
+                Peasant peasant = getFreePeasant();
+                if (peasant != null) {
+                    peasant.tryBuilding(UnitType.FARM);
+                }
+            }
+            else if (!hasEnoughBuilding(UnitType.LUMBERMILL, 1)) {
+                Peasant peasant = getFreePeasant();
+                if (peasant != null) {
+                    peasant.tryBuilding(UnitType.LUMBERMILL);
+                }
+            }
+            else if (!hasEnoughBuilding(UnitType.BLACKSMITH, 1)) {
+                Peasant peasant = getFreePeasant();
+                if (peasant != null) {
+                    peasant.tryBuilding(UnitType.BLACKSMITH);
+                }
+            }
+        }
+    }
 
     /**
      * Returns a peasants that is currently free.
@@ -109,7 +133,8 @@ public class Base {
      * @return Peasant object, if found one, null if there isn't one
      */
     private Peasant getFreePeasant() {
-        for (Peasant peasant : peasants) {
+        for (int i = 0, peasantsSize = peasants.size(); i < peasantsSize; i++) {
+            Peasant peasant = peasants.get(i);
             if (peasant.isFree())
                 return peasant;
         }
@@ -131,8 +156,6 @@ public class Base {
             try {
                 if(trainingLock.tryLock() || trainingLock.tryLock(1500, TimeUnit.MILLISECONDS))
                 {
-                    if((resources.getCapacity() + UnitType.PEASANT.foodCost) > resources.getCapacityLimit())
-                        return null;
                     sleepForMsec(UnitType.PEASANT.buildTime);
                     resources.removeCost(UnitType.PEASANT.goldCost, UnitType.PEASANT.woodCost);
                     resources.updateCapacity(UnitType.PEASANT.foodCost);
@@ -140,7 +163,6 @@ public class Base {
                     return result;
                 }
             } catch (InterruptedException e) {
-                e.printStackTrace();
             }finally {
                 trainingLock.unlock();
             }
@@ -167,9 +189,10 @@ public class Base {
      * @param required Number of required amount
      * @return true, if required amount is reached (or surpassed), false otherwise
      */
-    private boolean hasEnoughBuilding(UnitType unitType, int required){
+    private synchronized boolean hasEnoughBuilding(UnitType unitType, int required){
         int counter = 0;
-        for (Building building : buildings) {
+        for (int i = 0, buildingsSize = buildings.size(); i < buildingsSize; i++) {
+            Building building = buildings.get(i);
             if (building.getUnitType() == unitType)
                 counter++;
         }

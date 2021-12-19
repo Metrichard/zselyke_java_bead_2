@@ -27,17 +27,18 @@ public class Peasant extends Unit {
             return;
         System.out.println("Peasant starting mining");
         isHarvesting.set(true);
-        Thread t = new Thread(() -> {
-            try {
-                while(isHarvesting.get()) {
-                    TimeUnit.MILLISECONDS.sleep(HARVEST_WAIT_TIME);
-                    getOwner().getResources().addGold(HARVEST_AMOUNT);
-                }
-                Thread.currentThread().interrupt();
-            } catch (InterruptedException e) {
+        new Thread(this::mine).start();
+    }
+
+    private void mine() {
+        try {
+            while(isHarvesting.get()) {
+                TimeUnit.MILLISECONDS.sleep(HARVEST_WAIT_TIME);
+                getOwner().getResources().addGold(HARVEST_AMOUNT);
             }
-        });
-        t.start();
+            Thread.currentThread().interrupt();
+        } catch (InterruptedException e) {
+        }
     }
 
     /**
@@ -48,17 +49,18 @@ public class Peasant extends Unit {
             return;
         System.out.println("Peasant starting cutting wood");
         isHarvesting.set(true);
-        Thread t = new Thread(() -> {
-            try {
-                while(isHarvesting.get()) {
-                    TimeUnit.MILLISECONDS.sleep(HARVEST_WAIT_TIME);
-                    getOwner().getResources().addWood(HARVEST_AMOUNT);
-                }
-                Thread.currentThread().interrupt();
-            } catch (InterruptedException e) {
+        new Thread(this::cutWood).start();
+    }
+
+    private void cutWood() {
+        try {
+            while(isHarvesting.get()) {
+                TimeUnit.MILLISECONDS.sleep(HARVEST_WAIT_TIME);
+                getOwner().getResources().addWood(HARVEST_AMOUNT);
             }
-        });
-        t.start();
+            Thread.currentThread().interrupt();
+        } catch (InterruptedException e) {
+        }
     }
 
     /**
@@ -78,12 +80,13 @@ public class Peasant extends Unit {
      *         false, if there are insufficient resources
      */
     public boolean tryBuilding(UnitType buildingType){
-        if(getOwner().getResources().canBuild(getOwner().getResources().getGold(), getOwner().getResources().getWood()))
+        if(getOwner().getResources().canBuild(buildingType.goldCost, buildingType.woodCost))
         {
-            Thread t = new Thread(() -> {
+            new Thread(() -> {
+                isBuilding.set(true);
                 startBuilding(buildingType);
-            });
-            t.start();
+                isBuilding.set(false);
+            }).start();
             return true;
         }
         return false;
@@ -97,16 +100,14 @@ public class Peasant extends Unit {
      */
     private void startBuilding(UnitType buildingType){
         if(!isBuilding.get()) {
-            isBuilding.set(true);
             getOwner().getResources().removeCost(buildingType.goldCost, buildingType.woodCost);
-            Building.createBuilding(buildingType, getOwner());
+            var building = Building.createBuilding(buildingType, getOwner());
+            getOwner().getBuildings().add(building);
             try {
                 TimeUnit.MILLISECONDS.sleep(buildingType.buildTime);
             } catch (InterruptedException e) {
-                e.printStackTrace();
             }
         }
-        isBuilding.set(false);
     }
 
     /**
